@@ -2,6 +2,7 @@ import argparse
 import os
 import platform
 import sys
+import json
 from pathlib import Path
 
 import torch
@@ -25,8 +26,8 @@ BASEDIR = os.path.dirname(__file__)
 class yolov9:
 
     def __init__(self, conf_thres, iou_thres, device='cpu'):
-        self.weights = os.path.join(BASEDIR, 'weights', 'gelan-c.pt')
-        self.imgsz = (640, 640)
+        self.weights = os.path.join(BASEDIR, 'weights', 'human_monkey2.pt')
+        self.imgsz = (320, 320)
         self.iou_thres = iou_thres
         self.conf_thres = conf_thres
         self.data = os.path.join(BASEDIR, 'data', 'coco.yaml')
@@ -36,9 +37,10 @@ class yolov9:
     @smart_inference_mode()
     def run(self, source, view_img=False, project=os.path.join(BASEDIR, 'runs', 'detect'), nosave=False,
             dnn=False, half=False, vid_stride=1, name='exp', exist_ok=False, augment=False,
-            save_txt=False, classes=None, agnostic_nms=False, save_crop=False, line_thickness=3,
-            save_conf=False, hide_labels=False, hide_conf=False, update=False, visualize=False,webcam=True
+            save_txt=True, classes=None, agnostic_nms=False, save_crop=False, line_thickness=3,
+            save_conf=False, hide_labels=False, hide_conf=False, update=False, visualize=False,webcam=True,save_json=True
             ):
+        detections_summary = {}
         if webcam:
             source = '0'  # Default webcam
         elif source is None:
@@ -109,6 +111,12 @@ class yolov9:
                     p, im0, frame = path, im0s.copy(), getattr(dataset, 'frame', 0)
 
                 p = Path(p)  # to Path
+                #Changes for json
+                file_name = p.name
+                if file_name not in detections_summary:
+                    detections_summary[file_name] = {}
+                #changes_upto_here
+
                 save_path = str(save_dir / p.name)  # im.jpg
                 txt_path = str(save_dir / 'labels' / p.stem) + (
                     '' if dataset.mode == 'image' else f'_{frame}')  # im.txt
@@ -139,6 +147,14 @@ class yolov9:
                             annotator.box_label(xyxy, label, color=colors(c, True))
                         if save_crop:
                             save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                        #changes for json
+                        class_name = names[int(cls)]
+                        if class_name not in detections_summary[file_name]:
+                            detections_summary[file_name][class_name] = {'count': 0, 'frames': []}
+                        detections_summary[file_name][class_name]['count'] += 1
+                        if webcam or vid_cap:  # If it's a video or webcam, add the frame number
+                            detections_summary[file_name][class_name]['frames'].append(frame)
+                        #end
 
                     # Stream results
                     im0 = annotator.result()
@@ -159,7 +175,7 @@ class yolov9:
                                                 cv2.WINDOW_NORMAL | cv2.WINDOW_KEEPRATIO)  # allow window resize (Linux)
                                 cv2.resizeWindow(str(p), im0.shape[1], im0.shape[0])
                             cv2.imshow(str(p), im0)
-                            cv2.waitKey(0)  # 1 millisecond
+                            cv2.waitKey(1)  # 1 millisecond
 
                     # Save results (image with detections)
 
@@ -192,3 +208,10 @@ class yolov9:
             LOGGER.info(f"Results saved to {colorstr('bold', save_dir)}{s}")
         if update:
             strip_optimizer(self.weights[0])  # update model (to fix SourceChangeWarning)
+
+        if save_json:
+            json_path = str(save_dir / "detections.json")  # Define the JSON file path
+            with open(json_path, 'w') as f:
+                json.dump(detections_summary, f,indent=4)  # Save the detections summary to a JSON file
+
+            LOGGER.info(f"Detections saved to {json_path}")
